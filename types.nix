@@ -145,6 +145,7 @@ rec {
       ''
         set -efux
         # first create the necessary devices
+        ${sortedDeviceList}
         ${concatStrings (map (dev: attrByPath (dev ++ [ "_mount" "dev" ]) "" devices) sortedDeviceList)}
 
         # and then mount the filesystems in alphabetical order
