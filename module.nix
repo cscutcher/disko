@@ -2,11 +2,12 @@
 let
   types = import ./types.nix { inherit lib; };
   cfg = config.disko;
-in {
+in
+{
   options.disko = {
     devices = lib.mkOption {
       type = types.devices;
-      default = {};
+      default = { };
     };
     enableConfig = lib.mkOption {
       description = ''
@@ -18,7 +19,7 @@ in {
       default = true;
     };
   };
-  config = lib.mkIf (cfg.devices.disk != {}) {
+  config = lib.mkIf (cfg.devices.disk != { }) {
     system.build.formatScript = pkgs.writers.writeDash "disko-create" ''
       export PATH=${lib.makeBinPath (types.diskoLib.packages cfg.devices pkgs)}:$PATH
       ${types.diskoLib.create cfg.devices}

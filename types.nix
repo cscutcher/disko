@@ -11,8 +11,7 @@ rec {
       name = "subType";
       description = "one of ${concatStringsSep "," (attrNames typeAttr)}";
       check = x: if x ? type then typeAttr.${x.type}.check x else throw "No type option set in:\n${generators.toPretty {} x}";
-      merge = loc: defs:
-        foldl' (res: def: typeAttr.${def.value.type}.merge loc [def]) {} defs;
+      merge = loc: foldl' (res: def: typeAttr.${def.value.type}.merge loc [ def ]) { };
       nestedTypes = typeAttr;
     };
 
@@ -36,8 +35,7 @@ rec {
          deepMergeMap (x: x.t = "test") [ { x = { y = 1; z = 3; }; } { x = { bla = 234; }; } ]
          => { x = { y = 1; z = 3; bla = 234; t = "test"; }; }
     */
-    deepMergeMap = f: listOfAttrs:
-      foldr (attr: acc: (recursiveUpdate acc (f attr))) {} listOfAttrs;
+    deepMergeMap = f: foldr (attr: acc: (recursiveUpdate acc (f attr))) { };
 
     /* get a device and an index to get the matching device name
 
@@ -61,19 +59,22 @@ rec {
         abort "${dev} seems not to be a supported disk format";
 
     /* A nix option type representing a json datastructure, vendored from nixpkgs to avoid dependency on pkgs */
-    jsonType = let
-      valueType = types.nullOr (types.oneOf [
-        types.bool
-        types.int
-        types.float
-        types.str
-        types.path
-        (types.attrsOf valueType)
-        (types.listOf valueType)
-      ]) // {
-        description = "JSON value";
-      };
-    in valueType;
+    jsonType =
+      let
+        valueType = types.nullOr
+          (types.oneOf [
+            types.bool
+            types.int
+            types.float
+            types.str
+            types.path
+            (types.attrsOf valueType)
+            (types.listOf valueType)
+          ]) // {
+          description = "JSON value";
+        };
+      in
+      valueType;
 
     /* Given a attrset of deviceDependencies and a devices attrset
        returns a sorted list by deviceDependencies. aborts if a loop is found
@@ -83,13 +84,13 @@ rec {
     sortDevicesByDependencies = deviceDependencies: devices:
       let
         dependsOn = a: b:
-          elem a (attrByPath b [] deviceDependencies);
+          elem a (attrByPath b [ ] deviceDependencies);
         maybeSortedDevices = toposort dependsOn (diskoLib.deviceList devices);
       in
-        if (hasAttr "cycle" maybeSortedDevices) then
-          abort "detected a cycle in your disk setup: ${maybeSortedDevices.cycle}"
-        else
-          maybeSortedDevices.result;
+      if (hasAttr "cycle" maybeSortedDevices) then
+        abort "detected a cycle in your disk setup: ${maybeSortedDevices.cycle}"
+      else
+        maybeSortedDevices.result;
 
     /* Takes a devices attrSet and returns it as a list
 
@@ -112,7 +113,7 @@ rec {
          maybeSTr "hello world"
          => "hello world"
     */
-    maybeStr = x: optionalString (!isNull x) x;
+    maybeStr = x: optionalString (x != null) x;
 
     /* Takes a disko device specification, returns an attrset with metadata
 
@@ -124,29 +125,33 @@ rec {
 
        create :: types.devices -> str
     */
-    create = devices: let
-      sortedDeviceList = diskoLib.sortDevicesByDependencies ((diskoLib.meta devices).deviceDependencies or {}) devices;
-    in ''
-      set -efux
-      ${concatStrings (map (dev: attrByPath (dev ++ [ "_create" ]) "" devices) sortedDeviceList)}
-    '';
+    create = devices:
+      let
+        sortedDeviceList = diskoLib.sortDevicesByDependencies ((diskoLib.meta devices).deviceDependencies or { }) devices;
+      in
+      ''
+        set -efux
+        ${concatStrings (map (dev: attrByPath (dev ++ [ "_create" ]) "" devices) sortedDeviceList)}
+      '';
     /* Takes a disko device specification and returns a string which mounts the disks
 
        mount :: types.devices -> str
     */
-    mount = devices: let
-      fsMounts = diskoLib.deepMergeMap (dev: dev._mount.fs or {}) (flatten (map attrValues (attrValues devices)));
-      sortedDeviceList = diskoLib.sortDevicesByDependencies ((diskoLib.meta devices).deviceDependencies or {}) devices;
-    in ''
-      set -efux
-      # first create the necessary devices
-      ${concatStrings (map (dev: attrByPath (dev ++ [ "_mount" "dev" ]) "" devices) sortedDeviceList)}
+    mount = devices:
+      let
+        fsMounts = diskoLib.deepMergeMap (dev: dev._mount.fs or { }) (flatten (map attrValues (attrValues devices)));
+        sortedDeviceList = diskoLib.sortDevicesByDependencies ((diskoLib.meta devices).deviceDependencies or { }) devices;
+      in
+      ''
+        set -efux
+        # first create the necessary devices
+        ${concatStrings (map (dev: attrByPath (dev ++ [ "_mount" "dev" ]) "" devices) sortedDeviceList)}
 
-      # and then mount the filesystems in alphabetical order
-      # attrValues returns values sorted by name.  This is important, because it
-      # ensures that "/" is processed before "/foo" etc.
-      ${concatStrings (attrValues fsMounts)}
-    '';
+        # and then mount the filesystems in alphabetical order
+        # attrValues returns values sorted by name.  This is important, because it
+        # ensures that "/" is processed before "/foo" etc.
+        ${concatStrings (attrValues fsMounts)}
+      '';
 
     /* takes a disko device specification and returns a string which unmounts, destroys all disks and then runs create and mount
 
@@ -202,7 +207,7 @@ rec {
           # check for "/" explicitly below.
           xs = filter (s: stringLength s > 0) (splitString "/" x);
         in
-          isString x && (x == "/" || (length xs > 0 && all filename.check xs));
+        isString x && (x == "/" || (length xs > 0 && all filename.check xs));
       merge = mergeOneOption;
     };
   };
@@ -213,23 +218,23 @@ rec {
     options = {
       disk = mkOption {
         type = types.attrsOf disk;
-        default = {};
+        default = { };
       };
       mdadm = mkOption {
         type = types.attrsOf mdadm;
-        default = {};
+        default = { };
       };
       zpool = mkOption {
         type = types.attrsOf zpool;
-        default = {};
+        default = { };
       };
       lvm_vg = mkOption {
         type = types.attrsOf lvm_vg;
-        default = {};
+        default = { };
       };
       nodev = mkOption {
         type = types.attrsOf nodev;
-        default = {};
+        default = { };
       };
     };
   };
@@ -260,8 +265,7 @@ rec {
         internal = true;
         readOnly = true;
         type = diskoLib.jsonType;
-        default = {
-        };
+        default = { };
       };
       _create = mkOption {
         internal = true;
@@ -288,8 +292,8 @@ rec {
         readOnly = true;
         default = [{
           fileSystems.${config.mountpoint} = {
-            device = config.device;
-            fsType = config.fsType;
+            inherit (config) device;
+            inherit (config) fsType;
             options = config.mountOptions;
           };
         }];
@@ -298,7 +302,7 @@ rec {
         internal = true;
         readOnly = true;
         type = types.functionTo (types.listOf types.package);
-        default = pkgs: [];
+        default = pkgs: [ ];
       };
     };
   });
@@ -319,7 +323,7 @@ rec {
       };
       subvolumes = mkOption {
         type = types.attrsOf btrfs_subvol;
-        default = {};
+        default = { };
       };
       mountpoint = mkOption {
         type = types.nullOr optionTypes.absolute-pathname;
@@ -348,8 +352,9 @@ rec {
         default = dev:
           let
             subvolMounts = diskoLib.deepMergeMap (subvol: subvol._mount dev config.mountpoint) (attrValues config.subvolumes);
-          in {
-            fs = subvolMounts.fs // optionalAttrs (!isNull config.mountpoint) {
+          in
+          {
+            fs = subvolMounts.fs // optionalAttrs (config.mountpoint != null) {
               ${config.mountpoint} = ''
                 if ! findmnt ${dev} "/mnt${config.mountpoint}" > /dev/null 2>&1; then
                   mount ${dev} "/mnt${config.mountpoint}" \
@@ -365,7 +370,7 @@ rec {
         readOnly = true;
         default = dev: [
           (map (subvol: subvol._config dev config.mountpoint) (attrValues config.subvolumes))
-          (optional (!isNull config.mountpoint) {
+          (optional (config.mountpoint != null) {
             fileSystems.${config.mountpoint} = {
               device = dev;
               fsType = "btrfs";
@@ -411,8 +416,7 @@ rec {
         internal = true;
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
-        default = dev: {
-        };
+        default = dev: { };
       };
       _create = mkOption {
         internal = true;
@@ -431,34 +435,40 @@ rec {
         internal = true;
         readOnly = true;
         type = types.functionTo (types.functionTo diskoLib.jsonType);
-        default = dev: parent: let
-          mountpoint = if (!isNull config.mountpoint) then config.mountpoint
-                       else if (isNull parent) then config.name
-                       else null;
-        in optionalAttrs (!isNull mountpoint) {
-          fs.${mountpoint} = ''
-            if ! findmnt ${dev} "/mnt${mountpoint}" > /dev/null 2>&1; then
-              mount ${dev} "/mnt${mountpoint}" \
-              ${concatMapStringsSep " " (opt: "-o ${opt}") (config.mountOptions ++ [ "subvol=${config.name}" ])} \
-              -o X-mount.mkdir
-            fi
-          '';
-        };
+        default = dev: parent:
+          let
+            mountpoint =
+              if (config.mountpoint != null) then config.mountpoint
+              else if (parent == null) then config.name
+              else null;
+          in
+          optionalAttrs (mountpoint != null) {
+            fs.${mountpoint} = ''
+              if ! findmnt ${dev} "/mnt${mountpoint}" > /dev/null 2>&1; then
+                mount ${dev} "/mnt${mountpoint}" \
+                ${concatMapStringsSep " " (opt: "-o ${opt}") (config.mountOptions ++ [ "subvol=${config.name}" ])} \
+                -o X-mount.mkdir
+              fi
+            '';
+          };
       };
       _config = mkOption {
         internal = true;
         readOnly = true;
-        default = dev: parent: let
-          mountpoint = if (!isNull config.mountpoint) then config.mountpoint
-                       else if (isNull parent) then config.name
-                       else null;
-        in optional (!isNull mountpoint) {
-          fileSystems.${mountpoint} = {
-            device = dev;
-            fsType = "btrfs";
-            options = config.mountOptions ++ [ "subvol=${config.name}" ];
+        default = dev: parent:
+          let
+            mountpoint =
+              if (config.mountpoint != null) then config.mountpoint
+              else if (parent == null) then config.name
+              else null;
+          in
+          optional (mountpoint != null) {
+            fileSystems.${mountpoint} = {
+              device = dev;
+              fsType = "btrfs";
+              options = config.mountOptions ++ [ "subvol=${config.name}" ];
+            };
           };
-        };
       };
       _pkgs = mkOption {
         internal = true;
@@ -493,8 +503,7 @@ rec {
         internal = true;
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
-        default = dev: {
-        };
+        default = dev: { };
       };
       _create = mkOption {
         internal = true;
@@ -544,7 +553,7 @@ rec {
             else if (config.format == "ext2") then [ pkgs.e2fsprogs ]
             else if (config.format == "ext3") then [ pkgs.e2fsprogs ]
             else if (config.format == "ext4") then [ pkgs.e2fsprogs ]
-            else []
+            else [ ]
           );
       };
     };
@@ -562,7 +571,7 @@ rec {
       };
       partitions = mkOption {
         type = types.listOf partition;
-        default = [];
+        default = [ ];
       };
       _meta = mkOption {
         internal = true;
@@ -587,12 +596,13 @@ rec {
         default = dev:
           let
             partMounts = diskoLib.deepMergeMap (partition: partition._mount dev) config.partitions;
-          in {
+          in
+          {
             dev = ''
               ${concatStrings (map (x: x.dev or "") (attrValues partMounts))}
             '';
-            fs = partMounts.fs or {};
-        };
+            fs = partMounts.fs or { };
+          };
       };
       _config = mkOption {
         internal = true;
@@ -642,7 +652,7 @@ rec {
       };
       flags = mkOption {
         type = types.listOf types.str;
-        default = [];
+        default = [ ];
       };
       bootable = mkOption {
         type = types.bool;
@@ -654,7 +664,7 @@ rec {
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
         default = dev:
-          optionalAttrs (!isNull config.content) (config.content._meta dev);
+          optionalAttrs (config.content != null) (config.content._meta dev);
       };
       _create = mkOption {
         internal = true;
@@ -669,7 +679,7 @@ rec {
           ''}
           # ensure /dev/disk/by-path/..-partN exists before continuing
           udevadm trigger --subsystem-match=block; udevadm settle
-          ${optionalString (config.bootable) ''
+          ${optionalString config.bootable ''
             parted -s ${dev} -- set ${toString config.index} boot on
           ''}
           ${concatMapStringsSep "" (flag: ''
@@ -677,7 +687,7 @@ rec {
           '') config.flags}
           # ensure further operations can detect new partitions
           udevadm trigger --subsystem-match=block; udevadm settle
-          ${optionalString (!isNull config.content) (config.content._create (diskoLib.deviceNumbering dev config.index))}
+          ${optionalString (config.content != null) (config.content._create (diskoLib.deviceNumbering dev config.index))}
         '';
       };
       _mount = mkOption {
@@ -685,19 +695,19 @@ rec {
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
         default = dev:
-          optionalAttrs (!isNull config.content) (config.content._mount (diskoLib.deviceNumbering dev config.index));
+          optionalAttrs (config.content != null) (config.content._mount (diskoLib.deviceNumbering dev config.index));
       };
       _config = mkOption {
         internal = true;
         readOnly = true;
         default = dev:
-          optional (!isNull config.content) (config.content._config (diskoLib.deviceNumbering dev config.index));
+          optional (config.content != null) (config.content._config (diskoLib.deviceNumbering dev config.index));
       };
       _pkgs = mkOption {
         internal = true;
         readOnly = true;
         type = types.functionTo (types.listOf types.package);
-        default = pkgs: optionals (!isNull config.content) (config.content._pkgs pkgs);
+        default = pkgs: optionals (config.content != null) (config.content._pkgs pkgs);
       };
     };
   });
@@ -716,8 +726,7 @@ rec {
         internal = true;
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
-        default = dev: {
-        };
+        default = dev: { };
       };
       _create = mkOption {
         internal = true;
@@ -745,7 +754,7 @@ rec {
         default = dev: [{
           swapDevices = [{
             device = dev;
-            randomEncryption = config.randomEncryption;
+            inherit (config) randomEncryption;
           }];
         }];
       };
@@ -789,12 +798,12 @@ rec {
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
         default = dev:
-          {};
+          { };
       };
       _config = mkOption {
         internal = true;
         readOnly = true;
-        default = dev: [];
+        default = dev: [ ];
       };
       _pkgs = mkOption {
         internal = true;
@@ -817,7 +826,7 @@ rec {
       };
       lvs = mkOption {
         type = types.attrsOf lvm_lv;
-        default = {};
+        default = { };
       };
       _meta = mkOption {
         internal = true;
@@ -839,15 +848,17 @@ rec {
         internal = true;
         readOnly = true;
         type = diskoLib.jsonType;
-        default = let
-          lvMounts = diskoLib.deepMergeMap (lv: lv._mount config.name) (attrValues config.lvs);
-        in {
-          dev = ''
-            vgchange -a y
-            ${concatStrings (map (x: x.dev or "") (attrValues lvMounts))}
-          '';
-          fs = lvMounts.fs;
-        };
+        default =
+          let
+            lvMounts = diskoLib.deepMergeMap (lv: lv._mount config.name) (attrValues config.lvs);
+          in
+          {
+            dev = ''
+              vgchange -a y
+              ${concatStrings (map (x: x.dev or "") (attrValues lvMounts))}
+            '';
+            inherit (lvMounts) fs;
+          };
       };
       _config = mkOption {
         internal = true;
@@ -892,7 +903,7 @@ rec {
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
         default = dev:
-          optionalAttrs (!isNull config.content) (config.content._meta dev);
+          optionalAttrs (config.content != null) (config.content._meta dev);
       };
       _create = mkOption {
         internal = true;
@@ -903,10 +914,10 @@ rec {
             --yes \
             ${if hasInfix "%" config.size then "-l" else "-L"} ${config.size} \
             -n ${config.name} \
-            ${optionalString (!isNull config.lvm_type) "--type=${config.lvm_type}"} \
+            ${optionalString (config.lvm_type != null) "--type=${config.lvm_type}"} \
             ${config.extraArgs} \
             ${vg}
-          ${optionalString (!isNull config.content) (config.content._create "/dev/${vg}/${config.name}")}
+          ${optionalString (config.content != null) (config.content._create "/dev/${vg}/${config.name}")}
         '';
       };
       _mount = mkOption {
@@ -914,15 +925,15 @@ rec {
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
         default = vg:
-          optionalAttrs (!isNull config.content) (config.content._mount "/dev/${vg}/${config.name}");
+          optionalAttrs (config.content != null) (config.content._mount "/dev/${vg}/${config.name}");
       };
       _config = mkOption {
         internal = true;
         readOnly = true;
         default = vg:
           [
-            (optional (!isNull config.content) (config.content._config "/dev/${vg}/${config.name}"))
-            (optional (!isNull config.lvm_type) {
+            (optional (config.content != null) (config.content._config "/dev/${vg}/${config.name}"))
+            (optional (config.lvm_type != null) {
               boot.initrd.kernelModules = [ "dm-${config.lvm_type}" ];
             })
           ];
@@ -931,7 +942,7 @@ rec {
         internal = true;
         readOnly = true;
         type = types.functionTo (types.listOf types.package);
-        default = pkgs: lib.optionals (!isNull config.content) (config.content._pkgs pkgs);
+        default = pkgs: lib.optionals (config.content != null) (config.content._pkgs pkgs);
       };
     };
   });
@@ -966,12 +977,12 @@ rec {
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
         default = dev:
-          {};
+          { };
       };
       _config = mkOption {
         internal = true;
         readOnly = true;
-        default = dev: [];
+        default = dev: [ ];
       };
       _pkgs = mkOption {
         internal = true;
@@ -999,11 +1010,11 @@ rec {
       };
       options = mkOption {
         type = types.attrsOf types.str;
-        default = {};
+        default = { };
       };
       rootFsOptions = mkOption {
         type = types.attrsOf types.str;
-        default = {};
+        default = { };
       };
       mountpoint = mkOption {
         type = types.nullOr optionTypes.absolute-pathname;
@@ -1040,32 +1051,34 @@ rec {
         internal = true;
         readOnly = true;
         type = diskoLib.jsonType;
-        default = let
-          datasetMounts = diskoLib.deepMergeMap (dataset: dataset._mount config.name) (attrValues config.datasets);
-        in {
-          dev = ''
-            zpool list '${config.name}' >/dev/null 2>/dev/null || zpool import '${config.name}'
-            ${concatStrings (map (x: x.dev or "") (attrValues datasetMounts))}
-          '';
-          fs = datasetMounts.fs // optionalAttrs (!isNull config.mountpoint) {
-            ${config.mountpoint} = ''
-              if ! findmnt ${config.name} "/mnt${config.mountpoint}" > /dev/null 2>&1; then
-                mount ${config.name} "/mnt${config.mountpoint}" \
-                ${optionalString ((config.options.mountpoint or "") != "legacy") "-o zfsutil"} \
-                ${concatMapStringsSep " " (opt: "-o ${opt}") config.mountOptions} \
-                -o X-mount.mkdir \
-                -t zfs
-              fi
+        default =
+          let
+            datasetMounts = diskoLib.deepMergeMap (dataset: dataset._mount config.name) (attrValues config.datasets);
+          in
+          {
+            dev = ''
+              zpool list '${config.name}' >/dev/null 2>/dev/null || zpool import '${config.name}'
+              ${concatStrings (map (x: x.dev or "") (attrValues datasetMounts))}
             '';
+            fs = datasetMounts.fs // optionalAttrs (config.mountpoint != null) {
+              ${config.mountpoint} = ''
+                if ! findmnt ${config.name} "/mnt${config.mountpoint}" > /dev/null 2>&1; then
+                  mount ${config.name} "/mnt${config.mountpoint}" \
+                  ${optionalString ((config.options.mountpoint or "") != "legacy") "-o zfsutil"} \
+                  ${concatMapStringsSep " " (opt: "-o ${opt}") config.mountOptions} \
+                  -o X-mount.mkdir \
+                  -t zfs
+                fi
+              '';
+            };
           };
-        };
       };
       _config = mkOption {
         internal = true;
         readOnly = true;
         default = [
           (map (dataset: dataset._config config.name) (attrValues config.datasets))
-          (optional (!isNull config.mountpoint) {
+          (optional (config.mountpoint != null) {
             fileSystems.${config.mountpoint} = {
               device = config.name;
               fsType = "zfs";
@@ -1099,7 +1112,7 @@ rec {
       };
       options = mkOption {
         type = types.attrsOf types.str;
-        default = {};
+        default = { };
       };
       mountOptions = mkOption {
         type = types.listOf types.str;
@@ -1124,7 +1137,7 @@ rec {
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
         default = dev:
-          optionalAttrs (!isNull config.content) (config.content._meta dev);
+          optionalAttrs (config.content != null) (config.content._meta dev);
       };
       _create = mkOption {
         internal = true;
@@ -1136,7 +1149,7 @@ rec {
             ${optionalString (config.zfs_type == "volume") "-V ${config.size}"}
           ${optionalString (config.zfs_type == "volume") ''
             udevadm trigger --subsystem-match=block; udevadm settle
-            ${optionalString (!isNull config.content) (config.content._create "/dev/zvol/${zpool}/${config.name}")}
+            ${optionalString (config.content != null) (config.content._create "/dev/zvol/${zpool}/${config.name}")}
           ''}
         '';
       };
@@ -1145,8 +1158,9 @@ rec {
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
         default = zpool:
-          optionalAttrs (config.zfs_type == "volume" && !isNull config.content) (config.content._mount "/dev/zvol/${zpool}/${config.name}") //
-            optionalAttrs (config.zfs_type == "filesystem" && config.options.mountpoint or "" != "none") { fs.${config.mountpoint} = ''
+          optionalAttrs (config.zfs_type == "volume" && config.content != null) (config.content._mount "/dev/zvol/${zpool}/${config.name}") //
+          optionalAttrs (config.zfs_type == "filesystem" && config.options.mountpoint or "" != "none") {
+            fs.${config.mountpoint} = ''
               if ! findmnt ${zpool}/${config.name} "/mnt${config.mountpoint}" > /dev/null 2>&1; then
                 mount ${zpool}/${config.name} "/mnt${config.mountpoint}" \
                 -o X-mount.mkdir \
@@ -1154,13 +1168,14 @@ rec {
                 ${optionalString ((config.options.mountpoint or "") != "legacy") "-o zfsutil"} \
                 -t zfs
               fi
-            ''; };
+            '';
+          };
       };
       _config = mkOption {
         internal = true;
         readOnly = true;
         default = zpool:
-          (optional (config.zfs_type == "volume" && !isNull config.content) (config.content._config "/dev/zvol/${zpool}/${config.name}")) ++
+          (optional (config.zfs_type == "volume" && config.content != null) (config.content._config "/dev/zvol/${zpool}/${config.name}")) ++
           (optional (config.zfs_type == "filesystem" && config.options.mountpoint or "" != "none") {
             fileSystems.${config.mountpoint} = {
               device = "${zpool}/${config.name}";
@@ -1173,7 +1188,7 @@ rec {
         internal = true;
         readOnly = true;
         type = types.functionTo (types.listOf types.package);
-        default = pkgs: [ pkgs.util-linux ] ++ lib.optionals (!isNull config.content) (config.content._pkgs pkgs);
+        default = pkgs: [ pkgs.util-linux ] ++ lib.optionals (config.content != null) (config.content._pkgs pkgs);
       };
     };
   });
@@ -1203,7 +1218,7 @@ rec {
         readOnly = true;
         type = diskoLib.jsonType;
         default =
-          optionalAttrs (!isNull config.content) (config.content._meta [ "mdadm" config.name ]);
+          optionalAttrs (config.content != null) (config.content._meta [ "mdadm" config.name ]);
       };
       _create = mkOption {
         internal = true;
@@ -1218,7 +1233,7 @@ rec {
             --homehost=any \
             ''${RAIDDEVICES_${config.name}}
           udevadm trigger --subsystem-match=block; udevadm settle
-          ${optionalString (!isNull config.content) (config.content._create "/dev/md/${config.name}")}
+          ${optionalString (config.content != null) (config.content._create "/dev/md/${config.name}")}
         '';
       };
       _mount = mkOption {
@@ -1226,20 +1241,20 @@ rec {
         readOnly = true;
         type = diskoLib.jsonType;
         default =
-          optionalAttrs (!isNull config.content) (config.content._mount "/dev/md/${config.name}");
+          optionalAttrs (config.content != null) (config.content._mount "/dev/md/${config.name}");
         # TODO we probably need to assemble the mdadm somehow
       };
       _config = mkOption {
         internal = true;
         readOnly = true;
         default =
-          optional (!isNull config.content) (config.content._config "/dev/md/${config.name}");
+          optional (config.content != null) (config.content._config "/dev/md/${config.name}");
       };
       _pkgs = mkOption {
         internal = true;
         readOnly = true;
         type = types.functionTo (types.listOf types.package);
-        default = pkgs: (lib.optionals (!isNull config.content) (config.content._pkgs pkgs));
+        default = pkgs: (lib.optionals (config.content != null) (config.content._pkgs pkgs));
       };
     };
   });
@@ -1276,12 +1291,12 @@ rec {
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
         default = dev:
-          {};
+          { };
       };
       _config = mkOption {
         internal = true;
         readOnly = true;
-        default = dev: [];
+        default = dev: [ ];
       };
       _pkgs = mkOption {
         internal = true;
@@ -1307,7 +1322,7 @@ rec {
       };
       extraArgs = mkOption {
         type = types.listOf types.str;
-        default = [];
+        default = [ ];
       };
       content = diskoLib.deviceType;
       _meta = mkOption {
@@ -1315,7 +1330,7 @@ rec {
         readOnly = true;
         type = types.functionTo diskoLib.jsonType;
         default = dev:
-          optionalAttrs (!isNull config.content) (config.content._meta dev);
+          optionalAttrs (config.content != null) (config.content._meta dev);
       };
       _create = mkOption {
         internal = true;
@@ -1323,8 +1338,8 @@ rec {
         type = types.functionTo types.str;
         default = dev: ''
           cryptsetup -q luksFormat ${dev} ${diskoLib.maybeStr config.keyFile} ${toString config.extraArgs}
-          cryptsetup luksOpen ${dev} ${config.name} ${optionalString (!isNull config.keyFile) "--key-file ${config.keyFile}"}
-          ${optionalString (!isNull config.content) (config.content._create "/dev/mapper/${config.name}")}
+          cryptsetup luksOpen ${dev} ${config.name} ${optionalString (config.keyFile != null) "--key-file ${config.keyFile}"}
+          ${optionalString (config.content != null) (config.content._create "/dev/mapper/${config.name}")}
         '';
       };
       _mount = mkOption {
@@ -1335,14 +1350,14 @@ rec {
           let
             contentMount = config.content._mount "/dev/mapper/${config.name}";
           in
-            {
-              dev = ''
-                cryptsetup status ${config.name} >/dev/null 2>/dev/null ||
-                  cryptsetup luksOpen ${dev} ${config.name} ${optionalString (!isNull config.keyFile) "--key-file ${config.keyFile}"}
-                ${optionalString (!isNull config.content) contentMount.dev or ""}
-              '';
-              fs = optionalAttrs (!isNull config.content) contentMount.fs or {};
-            };
+          {
+            dev = ''
+              cryptsetup status ${config.name} >/dev/null 2>/dev/null ||
+                cryptsetup luksOpen ${dev} ${config.name} ${optionalString (config.keyFile != null) "--key-file ${config.keyFile}"}
+              ${optionalString (config.content != null) contentMount.dev or ""}
+            '';
+            fs = optionalAttrs (config.content != null) contentMount.fs or { };
+          };
       };
       _config = mkOption {
         internal = true;
@@ -1351,13 +1366,13 @@ rec {
           [
             # TODO do we need this always in initrd and only there?
             { boot.initrd.luks.devices.${config.name}.device = dev; }
-          ] ++ (optional (!isNull config.content) (config.content._config "/dev/mapper/${config.name}"));
+          ] ++ (optional (config.content != null) (config.content._config "/dev/mapper/${config.name}"));
       };
       _pkgs = mkOption {
         internal = true;
         readOnly = true;
         type = types.functionTo (types.listOf types.package);
-        default = pkgs: [ pkgs.cryptsetup ] ++ (lib.optionals (!isNull config.content) (config.content._pkgs pkgs));
+        default = pkgs: [ pkgs.cryptsetup ] ++ (lib.optionals (config.content != null) (config.content._pkgs pkgs));
       };
     };
   });
@@ -1382,7 +1397,7 @@ rec {
         readOnly = true;
         type = diskoLib.jsonType;
         default =
-          optionalAttrs (!isNull config.content) (config.content._meta [ "disk" config.device ]);
+          optionalAttrs (config.content != null) (config.content._meta [ "disk" config.device ]);
       };
       _create = mkOption {
         internal = true;
@@ -1395,19 +1410,19 @@ rec {
         readOnly = true;
         type = diskoLib.jsonType;
         default =
-          optionalAttrs (!isNull config.content) (config.content._mount config.device);
+          optionalAttrs (config.content != null) (config.content._mount config.device);
       };
       _config = mkOption {
         internal = true;
         readOnly = true;
         default =
-          optional (!isNull config.content) (config.content._config config.device);
+          optional (config.content != null) (config.content._config config.device);
       };
       _pkgs = mkOption {
         internal = true;
         readOnly = true;
         type = types.functionTo (types.listOf types.package);
-        default = pkgs: [ pkgs.jq ] ++ lib.optionals (!isNull config.content) (config.content._pkgs pkgs);
+        default = pkgs: [ pkgs.jq ] ++ lib.optionals (config.content != null) (config.content._pkgs pkgs);
       };
     };
   });

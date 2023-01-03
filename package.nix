@@ -1,7 +1,7 @@
 { stdenvNoCC, lib }:
 
 let
-  inclFiles = {src, name}: files: lib.cleanSourceWith {
+  inclFiles = { src, name }: files: lib.cleanSourceWith {
     inherit src name;
     filter = _path: _type: _type == "regular" && lib.any (file: builtins.baseNameOf _path == file) files;
   };
