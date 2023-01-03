@@ -561,7 +561,7 @@ rec {
         type = diskoLib.jsonType;
         default =
           let
-            dev = config.device_by_label;
+            dev = [ "btrfs_raid" config.name ];
           in
           diskoLib.deepMergeMap (subvol: subvol._meta dev) (attrValues config.subvolumes);
       };
