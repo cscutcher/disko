@@ -558,8 +558,11 @@ rec {
       _meta = mkOption {
         internal = true;
         readOnly = true;
-        type = types.functionTo diskoLib.jsonType;
-        default = dev:
+        type = diskoLib.jsonType;
+        default =
+          let
+            dev = config.device_by_label;
+          in
           diskoLib.deepMergeMap (subvol: subvol._meta dev) (attrValues config.subvolumes);
       };
       #####################################################################
