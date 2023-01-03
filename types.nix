@@ -636,53 +636,52 @@ rec {
       _mount = mkOption {
         internal = true;
         readOnly = true;
+        type = diskoLib.jsonType;
         default =
           let
-            root = {
-              fs.${config.mountpoint} =
-                let
-                  source_arg = strings.escapeShellArg "LABEL=${config.label}";
-                  dest_arg = strings.escapeShellArg "/mnt${config.mountpoint}";
-                in
-                ''
-                  if ! findmnt ${source_arg} ${dest_arg} > /dev/null 2>&1; then
-                    mount ${source_arg} ${dest_arg} \
-                    ${concatMapStringsSep
-                    " "
-                    (opt: "-o ${opt}")
-                    (config.mountOptions ++ ["subvol=/"])
-                    } \
-                    -o X-mount.mkdir
-                  fi
-                '';
-            };
-            subvolumes = diskoLib.deepMergeMap
-              (subvol: subvol._mount config)
-              (attrValues config.subvolumes);
-
+            dev = config.device_by_label;
+            subvolMounts = diskoLib.deepMergeMap (subvol: subvol._mount dev config.mountpoint) (attrValues config.subvolumes);
           in
-          attrsets.recursiveUpdate subvolumes root
-        ;
-        type = diskoLib.jsonType;
+          {
+            fs = subvolMounts.fs // optionalAttrs (config.mountpoint != null) {
+              ${config.mountpoint} = ''
+                if ! findmnt ${dev} "/mnt${config.mountpoint}" > /dev/null 2>&1; then
+                  mount ${dev} "/mnt${config.mountpoint}" \
+                  ${concatMapStringsSep " " (opt: "-o ${opt}") (
+                    config.mountOptions ++ [
+                      "subvol=/"
+                    ]
+                    )} \
+                  -o X-mount.mkdir
+                fi
+              '';
+            };
+          };
       };
       _config = mkOption {
         internal = true;
         readOnly = true;
-        default = [
-          (map (subvolume: subvolume._config config) (attrValues config.subvolumes))
-          {
-            fileSystems.${config.mountpoint} = {
-              device = config.device_by_label;
-              fsType = "btrfs";
-            };
-          }
-        ];
+        default =
+          let
+            dev = config.device_by_label;
+          in
+          [
+            (map (subvol: subvol._config dev config.mountpoint) (attrValues config.subvolumes))
+            (optional (config.mountpoint != null) {
+              fileSystems.${config.mountpoint} = {
+                device = dev;
+                fsType = "btrfs";
+                options = config.mountOptions;
+              };
+            })
+          ];
       };
       _pkgs = mkOption {
         internal = true;
         readOnly = true;
         type = types.functionTo (types.listOf types.package);
-        default = pkgs: [ pkgs.util-linux ] ++ (flatten (map (subvolume: subvolume._pkgs pkgs) (attrValues config.subvolumes)));
+        default = pkgs:
+          [ pkgs.util-linux pkgs.btrfs-progs ] ++ flatten (map (subvolume: subvolume._pkgs pkgs) (attrValues config.subvolumes));
       };
     };
   });
