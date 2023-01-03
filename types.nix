@@ -17,13 +17,13 @@ rec {
 
     # option for valid contents of partitions (basically like devices, but without tables)
     partitionType = mkOption {
-      type = types.nullOr (diskoLib.subType { inherit btrfs filesystem zfs mdraid luks lvm_pv swap; });
+      type = types.nullOr (diskoLib.subType { inherit btrfs btrfs_raid_part filesystem zfs mdraid luks lvm_pv swap; });
       default = null;
     };
 
     # option for valid contents of devices
     deviceType = mkOption {
-      type = types.nullOr (diskoLib.subType { inherit table btrfs filesystem zfs mdraid luks lvm_pv swap; });
+      type = types.nullOr (diskoLib.subType { inherit table btrfs btrfs_raid_part filesystem zfs mdraid luks lvm_pv swap; });
       default = null;
     };
 
@@ -226,6 +226,10 @@ rec {
       };
       zpool = mkOption {
         type = types.attrsOf zpool;
+        default = { };
+      };
+      btrfs_raid = mkOption {
+        type = types.attrsOf btrfs_raid;
         default = { };
       };
       lvm_vg = mkOption {
@@ -478,6 +482,307 @@ rec {
       };
     };
   });
+
+  btrfs_raid_part = types.submodule ({ config, ... }: {
+    options = {
+      type = mkOption {
+        type = types.enum [ "btrfs_raid_part" ];
+        internal = true;
+      };
+      name = mkOption {
+        type = types.str;
+      };
+      pool = mkOption {
+        type = types.str;
+      };
+      _meta = mkOption {
+        internal = true;
+        readOnly = true;
+        type = types.functionTo diskoLib.jsonType;
+        default = dev: {
+          deviceDependencies.btrfs_raid.${config.pool} = [ dev ];
+        };
+      };
+      _create = mkOption {
+        internal = true;
+        readOnly = true;
+        type = types.functionTo types.str;
+        default = dev: ''
+          BTRFSDEVICES_${config.pool}="''${BTRFSDEVICES_${config.pool}:-}${dev} "
+        '';
+      };
+      _mount = mkOption {
+        internal = true;
+        readOnly = true;
+        type = types.functionTo diskoLib.jsonType;
+        default = dev:
+          { };
+      };
+      _config = mkOption {
+        internal = true;
+        readOnly = true;
+        default = dev: [ ];
+      };
+      _pkgs = mkOption {
+        internal = true;
+        readOnly = true;
+        type = types.functionTo (types.listOf types.package);
+        default = pkgs: [ ];
+      };
+    };
+  });
+
+  btrfs_raid = types.submodule ({ config, ... }: {
+    options = {
+      name = mkOption {
+        type = types.str;
+        default = config._module.args.name;
+      };
+      label = mkOption {
+        type = types.str;
+        default = config.name;
+      };
+      type = mkOption {
+        type = types.enum [ "btrfs_raid" ];
+        internal = true;
+      };
+      data_profile = mkOption {
+        type = types.enum [
+          "raid0"
+          "raid1"
+          "raid1c3"
+          "raid1c4"
+          "raid5"
+          "raid6"
+          "raid10"
+          "single"
+          "dup"
+        ];
+      };
+      metadata_profile = mkOption {
+        type = types.enum [
+          "raid0"
+          "raid1"
+          "raid1c3"
+          "raid1c4"
+          "raid5"
+          "raid6"
+          "raid10"
+          "single"
+          "dup"
+        ];
+      };
+      # TODO: Fix options!
+      options = mkOption {
+        type = types.attrsOf types.str;
+        default = { };
+      };
+      mountpoint = mkOption {
+        type = types.nullOr optionTypes.absolute-pathname;
+        default = null;
+      };
+      mountOptions = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+      };
+      subvolumes = mkOption {
+        type = types.attrsOf btrfs_raid_subvolume;
+        default = { };
+      };
+
+      device_by_label = mkOption {
+        type = types.str;
+        readOnly = true;
+        description = "Suitable device for mounting under `/dev/disk/by-label/`";
+        default = "/dev/mapper/by-label/${config.label}";
+      };
+
+      _meta = mkOption {
+        internal = true;
+        readOnly = true;
+        type = diskoLib.jsonType;
+        default =
+          diskoLib.deepMergeMap (subvolume: subvolume._meta [ "btrfs_raid" config.name ]) (attrValues config.subvolumes);
+      };
+      _create = mkOption {
+        internal = true;
+        readOnly = true;
+        type = types.str;
+        default =
+          let
+            create_subvolume = subvolume: "btrfs subvolume create \"$MNTPOINT\"/${subvolume}";
+            create_subvolumes = concatMapStringsSep "\n" create_subvolume config.subvolumes;
+            subvolume_create = optionalString (config.subvolumes != { }) ''
+
+            MNTPOINT=$(mktemp -d)
+            (
+              mount ${strings.escapeShellArg config.device_by_label} "$MNTPOINT"
+              trap 'umount $MNTPOINT; rm -rf $MNTPOINT' EXIT
+              ${create_subvolumes}
+            )
+          '';
+          in
+          ''
+            mkfs.btrfs \
+              --label ${strings.escapeShellArg config.label} \
+              --data ${config.data_profile} \
+              --metadata ${config.metadata_profile} \
+              ''${BTRFSDEVICES_${config.name}}
+          '';
+      };
+      _mount = mkOption {
+        internal = true;
+        readOnly = true;
+        default =
+          let
+            root = {
+              fs.${config.mountpoint} =
+                let
+                  source_arg = strings.escapeShellArg "LABEL=${config.label}";
+                  dest_arg = strings.escapeShellArg "/mnt${config.mountpoint}";
+                in
+                ''
+                  if ! findmnt ${source_arg} ${dest_arg} > /dev/null 2>&1; then
+                    mount ${source_arg} ${dest_arg} \
+                    ${concatMapStringsSep
+                    " "
+                    (opt: "-o ${opt}")
+                    (config.mountOptions ++ ["subvol=/"])
+                    } \
+                    -o X-mount.mkdir
+                  fi
+                '';
+            };
+            subvolumes = diskoLib.deepMergeMap
+              (subvol: subvol._mount config)
+              (attrValues config.subvolumes);
+
+          in
+          attrsets.recursiveUpdate subvolumes root
+        ;
+        type = diskoLib.jsonType;
+      };
+      _config = mkOption {
+        internal = true;
+        readOnly = true;
+        default = [
+          (map (subvolume: subvolume._config config) (attrValues config.subvolumes))
+          {
+            fileSystems.${config.mountpoint} = {
+              device = config.device_by_label;
+              fsType = "btrfs";
+            };
+          }
+        ];
+      };
+      _pkgs = mkOption {
+        internal = true;
+        readOnly = true;
+        type = types.functionTo (types.listOf types.package);
+        default = pkgs: [ pkgs.util-linux ] ++ (flatten (map (subvolume: subvolume._pkgs pkgs) (attrValues config.subvolumes)));
+      };
+    };
+  });
+
+  btrfs_raid_subvolume = types.submodule
+    ({ config, ... }: {
+      options = {
+        name = mkOption {
+          type = types.str;
+          default = config._module.args.name;
+        };
+        subvol_path = mkOption {
+          type = optionTypes.absolute-pathname;
+          default = "/${config.name}";
+        };
+        type = mkOption {
+          type = types.enum [ "btrfs_raid_subvolume" ];
+          default = "btrfs_raid_subvolume";
+          internal = true;
+        };
+
+        # filesystem options
+        mountpoints = mkOption {
+          type = types.listOf optionTypes.absolute-pathname;
+          default = [ ];
+        };
+
+        _meta = mkOption {
+          internal = true;
+          readOnly = true;
+          type = types.functionTo diskoLib.jsonType;
+          default = dev: { };
+        };
+
+        _create = mkOption {
+          internal = true;
+          readOnly = true;
+          type = types.functionTo types.str;
+          default = dev: "";
+        };
+
+        _mount = mkOption {
+          internal = true;
+          readOnly = true;
+          type = types.functionTo diskoLib.jsonType;
+          default = btrfs_raid:
+            let
+              dev_arg = strings.escapeShellArg btrfs_raid.device_by_label;
+              subvol_option = "subvol=${config.subvol_path}";
+              subvol_mounted = mountpoint: ''
+                findmnt \
+                  --source ${dev_arg} \
+                  --target ${strings.escapeShellArg mountpoint} \
+                  -O ${strings.escapeShellArg subvol_option} \
+                  > /dev/null 2>&1
+              '';
+              mount_command = mountpoint: ''
+                if ! ( ${subvol_mounted mountpoint} ); then
+                  mount \
+                    ${strings.escapeShellArg btrfs_raid.device_by_label}  \
+                    ${strings.escapeShellArg mountpoint} \
+                    ${concatMapStringsSep
+                    " "
+                    (opt: "-o ${opt}")
+                    ([subvol_option] ++ btrfs_raid.mountOptions)
+                    } \
+                    -o X-mount.mkdir
+                fi
+              '';
+            in
+            {
+              fs = attrsets.genAttrs
+                config.mountpoints
+                mount_command
+              ;
+            };
+        };
+        _config = mkOption {
+          internal = true;
+          readOnly = true;
+          default = btrfs_raid: {
+            fileSystems = attrsets.genAttrs config.mountpoints (mountpoint:
+              {
+                options =
+                  let
+                    full_options = btrfs_raid.options // { "subvol" = config.subvol_path; };
+                  in
+                  attrsets.mapAttrsToList (key: value: "${key}=${value}") full_options;
+                fsType = "btrfs";
+                device = btrfs_raid.device_by_label;
+              }
+            );
+          };
+        };
+        _pkgs = mkOption {
+          internal = true;
+          readOnly = true;
+          type = types.functionTo (types.listOf types.package);
+          default = pkgs: [ pkgs.util-linux ];
+        };
+      };
+    }
+    );
 
   filesystem = types.submodule ({ config, ... }: {
     options = {
@@ -1397,7 +1702,37 @@ rec {
         readOnly = true;
         type = diskoLib.jsonType;
         default =
-          optionalAttrs (config.content != null) (config.content._meta [ "disk" config.device ]);
+          let
+            # Fix any references to ["disk" config.device] to also dependend
+            # on ["disk" config.name], this seems to be required for dependency
+            # resolution to work.
+            # I don't want to change the argument passed into the content meta
+            # since that would deviate even more from upstream.
+            # TODO: Work out if this is intended behaviour upstream or a bug.
+            fix_refs = meta_inp: (
+              meta_inp // {
+                deviceDependencies = attrsets.mapAttrsRecursive
+                  (path: deps:
+                    if isList deps
+                    then
+                      (
+                        lists.concatMap
+                          (dep:
+                            if (lists.take 2 dep) == [ "disk" config.device ]
+                            then [ dep ([ "disk" config.name ] ++ (lists.drop 2 dep)) ]
+                            else dep
+                          )
+                          deps
+                      )
+                    else deps
+                  )
+                  (meta_inp.deviceDependencies or { })
+                ;
+              }
+            );
+          in
+          fix_refs (
+            optionalAttrs (config.content != null) (config.content._meta [ "disk" config.device ]));
       };
       _create = mkOption {
         internal = true;
