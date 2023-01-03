@@ -534,6 +534,41 @@ rec {
 
   btrfs_raid = types.submodule ({ config, ... }: {
     options = {
+      type = mkOption {
+        type = types.enum [ "btrfs_raid" ];
+        internal = true;
+      };
+      extraArgs = mkOption {
+        type = types.str;
+        default = "";
+      };
+      mountOptions = mkOption {
+        type = types.listOf types.str;
+        default = [ "defaults" ];
+      };
+      subvolumes = mkOption {
+        type = types.attrsOf btrfs_subvol;
+        default = { };
+      };
+      mountpoint = mkOption {
+        type = types.nullOr optionTypes.absolute-pathname;
+        default = null;
+      };
+
+      _meta = mkOption {
+        internal = true;
+        readOnly = true;
+        type = types.functionTo diskoLib.jsonType;
+        default = dev:
+          diskoLib.deepMergeMap (subvol: subvol._meta dev) (attrValues config.subvolumes);
+      };
+      #####################################################################
+      # Above more or less the same as btrfs
+      #####################################################################
+
+      ####################################################################
+      # For btrfs_raid type
+      #####################################################################
       name = mkOption {
         type = types.str;
         default = config._module.args.name;
@@ -541,10 +576,6 @@ rec {
       label = mkOption {
         type = types.str;
         default = config.name;
-      };
-      type = mkOption {
-        type = types.enum [ "btrfs_raid" ];
-        internal = true;
       };
       data_profile = mkOption {
         type = types.enum [
@@ -572,23 +603,6 @@ rec {
           "dup"
         ];
       };
-      # TODO: Fix options!
-      options = mkOption {
-        type = types.attrsOf types.str;
-        default = { };
-      };
-      mountpoint = mkOption {
-        type = types.nullOr optionTypes.absolute-pathname;
-        default = null;
-      };
-      mountOptions = mkOption {
-        type = types.listOf types.str;
-        default = [ ];
-      };
-      subvolumes = mkOption {
-        type = types.attrsOf btrfs_raid_subvolume;
-        default = { };
-      };
 
       device_by_label = mkOption {
         type = types.str;
@@ -597,37 +611,26 @@ rec {
         default = "/dev/mapper/by-label/${config.label}";
       };
 
-      _meta = mkOption {
-        internal = true;
-        readOnly = true;
-        type = diskoLib.jsonType;
-        default =
-          diskoLib.deepMergeMap (subvolume: subvolume._meta [ "btrfs_raid" config.name ]) (attrValues config.subvolumes);
+      # TODO: Fix options!
+      options = mkOption {
+        type = types.attrsOf types.str;
+        default = { };
       };
+
       _create = mkOption {
         internal = true;
         readOnly = true;
         type = types.str;
         default =
-          let
-            create_subvolume = subvolume: "btrfs subvolume create \"$MNTPOINT\"/${subvolume}";
-            create_subvolumes = concatMapStringsSep "\n" create_subvolume config.subvolumes;
-            subvolume_create = optionalString (config.subvolumes != { }) ''
-
-            MNTPOINT=$(mktemp -d)
-            (
-              mount ${strings.escapeShellArg config.device_by_label} "$MNTPOINT"
-              trap 'umount $MNTPOINT; rm -rf $MNTPOINT' EXIT
-              ${create_subvolumes}
-            )
-          '';
-          in
           ''
             mkfs.btrfs \
               --label ${strings.escapeShellArg config.label} \
               --data ${config.data_profile} \
               --metadata ${config.metadata_profile} \
+              ${config.extraArgs} \
               ''${BTRFSDEVICES_${config.name}}
+
+            ${concatMapStrings (subvol: subvol._create config.device_by_label) (attrValues config.subvolumes)}
           '';
       };
       _mount = mkOption {
@@ -683,106 +686,6 @@ rec {
       };
     };
   });
-
-  btrfs_raid_subvolume = types.submodule
-    ({ config, ... }: {
-      options = {
-        name = mkOption {
-          type = types.str;
-          default = config._module.args.name;
-        };
-        subvol_path = mkOption {
-          type = optionTypes.absolute-pathname;
-          default = "/${config.name}";
-        };
-        type = mkOption {
-          type = types.enum [ "btrfs_raid_subvolume" ];
-          default = "btrfs_raid_subvolume";
-          internal = true;
-        };
-
-        # filesystem options
-        mountpoints = mkOption {
-          type = types.listOf optionTypes.absolute-pathname;
-          default = [ ];
-        };
-
-        _meta = mkOption {
-          internal = true;
-          readOnly = true;
-          type = types.functionTo diskoLib.jsonType;
-          default = dev: { };
-        };
-
-        _create = mkOption {
-          internal = true;
-          readOnly = true;
-          type = types.functionTo types.str;
-          default = dev: "";
-        };
-
-        _mount = mkOption {
-          internal = true;
-          readOnly = true;
-          type = types.functionTo diskoLib.jsonType;
-          default = btrfs_raid:
-            let
-              dev_arg = strings.escapeShellArg btrfs_raid.device_by_label;
-              subvol_option = "subvol=${config.subvol_path}";
-              subvol_mounted = mountpoint: ''
-                findmnt \
-                  --source ${dev_arg} \
-                  --target ${strings.escapeShellArg mountpoint} \
-                  -O ${strings.escapeShellArg subvol_option} \
-                  > /dev/null 2>&1
-              '';
-              mount_command = mountpoint: ''
-                if ! ( ${subvol_mounted mountpoint} ); then
-                  mount \
-                    ${strings.escapeShellArg btrfs_raid.device_by_label}  \
-                    ${strings.escapeShellArg mountpoint} \
-                    ${concatMapStringsSep
-                    " "
-                    (opt: "-o ${opt}")
-                    ([subvol_option] ++ btrfs_raid.mountOptions)
-                    } \
-                    -o X-mount.mkdir
-                fi
-              '';
-            in
-            {
-              fs = attrsets.genAttrs
-                config.mountpoints
-                mount_command
-              ;
-            };
-        };
-        _config = mkOption {
-          internal = true;
-          readOnly = true;
-          default = btrfs_raid: {
-            fileSystems = attrsets.genAttrs config.mountpoints (mountpoint:
-              {
-                options =
-                  let
-                    full_options = btrfs_raid.options // { "subvol" = config.subvol_path; };
-                  in
-                  attrsets.mapAttrsToList (key: value: "${key}=${value}") full_options;
-                fsType = "btrfs";
-                device = btrfs_raid.device_by_label;
-              }
-            );
-          };
-        };
-        _pkgs = mkOption {
-          internal = true;
-          readOnly = true;
-          type = types.functionTo (types.listOf types.package);
-          default = pkgs: [ pkgs.util-linux ];
-        };
-      };
-    }
-    );
 
   filesystem = types.submodule ({ config, ... }: {
     options = {
