@@ -142,10 +142,10 @@ rec {
         fsMounts = diskoLib.deepMergeMap (dev: dev._mount.fs or { }) (flatten (map attrValues (attrValues devices)));
         sortedDeviceList = diskoLib.sortDevicesByDependencies ((diskoLib.meta devices).deviceDependencies or { }) devices;
       in
+      assert sortedDeviceList == null;
       ''
         set -efux
         # first create the necessary devices
-        ${sortedDeviceList}
         ${concatStrings (map (dev: attrByPath (dev ++ [ "_mount" "dev" ]) "" devices) sortedDeviceList)}
 
         # and then mount the filesystems in alphabetical order
